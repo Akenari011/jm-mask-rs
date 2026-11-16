@@ -99,9 +99,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet --upgrade pip
           rm -rf whl && mkdir -p whl
-          python3 -m pip download --no-deps --only-binary=:all: \
+          python3 -m pip download --no-deps --only-binary=:all: --break-system-packages \
             --platform ${{ matrix.wheel_platform }} \
             --python-version 3.12 \
             --implementation cp --abi cp312 \
