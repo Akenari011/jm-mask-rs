@@ -15,7 +15,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # ── Linux / Windows：静态链接 onnxruntime，单文件自包含 ──────────────────
+  build-static:
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -25,27 +26,13 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset: jm-mask-rs-linux-x86_64
-            ext: ""
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             asset: jm-mask-rs-linux-aarch64
-            ext: ""
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            asset: jm-mask-rs-macos-arm64
-            ext: ""
-          - os: macos-13
-            target: x86_64-apple-darwin
-            asset: jm-mask-rs-macos-x86_64
-            ext: ""
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             asset: jm-mask-rs-windows-x86_64
             ext: ".exe"
-
-    env:
-      # macOS：ORT 静态库依赖较新的部署目标，否则链接报 ___isPlatformVersionAtLeast
-      MACOSX_DEPLOYMENT_TARGET: "13.0"
 
     steps:
       - uses: actions/checkout@v4
@@ -54,20 +41,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: macOS 链接参数（CoreML 等框架）
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          mkdir -p .cargo
-          cat >> .cargo/config.toml <<'CFG'
-          [target.aarch64-apple-darwin]
-          rustflags = ["-C", "link-arg=-framework", "-C", "link-arg=CoreML", "-C", "link-arg=-framework", "-C", "link-arg=Foundation", "-C", "link-arg=-framework", "-C", "link-arg=Accelerate", "-C", "link-arg=-lc++"]
-
-          [target.x86_64-apple-darwin]
-          rustflags = ["-C", "link-arg=-framework", "-C", "link-arg=CoreML", "-C", "link-arg=-framework", "-C", "link-arg=Foundation", "-C", "link-arg=-framework", "-C", "link-arg=Accelerate", "-C", "link-arg=-lc++"]
-          CFG
-          cat .cargo/config.toml
 
       - name: 缓存依赖
         uses: Swatinem/rust-cache@v2
@@ -91,8 +64,88 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # ── macOS：动态链接，二进制 + libonnxruntime.dylib 打包 ─────────────────
+  # ORT 官方 macOS 预编译库含 CoreML 的 ObjC++ 对象，静态链接会缺
+  # ___isPlatformVersionAtLeast 符号，故 macOS 采用动态加载 + 附带 dylib。
+  build-macos:
+    name: build ${{ matrix.asset }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            asset: jm-mask-rs-macos-arm64
+            wheel_platform: macosx_11_0_arm64
+          - target: x86_64-apple-darwin
+            asset: jm-mask-rs-macos-x86_64
+            wheel_platform: macosx_11_0_x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 缓存依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: 构建（动态加载 onnxruntime）
+        run: cargo build --release --target ${{ matrix.target }} --no-default-features --features dynamic-ort
+
+      - name: 取 onnxruntime dylib（来自官方 wheel）
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --upgrade pip
+          rm -rf whl && mkdir -p whl
+          python3 -m pip download --no-deps --only-binary=:all: \
+            --platform ${{ matrix.wheel_platform }} \
+            --python-version 3.12 \
+            --implementation cp --abi cp312 \
+            -d whl onnxruntime
+          cd whl && unzip -q -o onnxruntime-*.whl -d ext
+          find ext -name "libonnxruntime*.dylib" -exec ls -la {} \;
+          DYLIB=$(find ext -name "libonnxruntime*.dylib" | head -1)
+          test -n "$DYLIB"
+          mkdir -p ../dist
+          cp "$DYLIB" ../dist/
+
+      - name: 打包（二进制 + dylib）
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pkg
+          cp "target/${{ matrix.target }}/release/jm-mask-rs" pkg/
+          cp dist/libonnxruntime*.dylib pkg/
+          cat > pkg/README.txt <<'TXT'
+          jm-mask-rs (macOS)
+
+          运行前把 dylib 目录加入查找路径：
+
+            export MASK_ORT_DYLIB="$PWD/libonnxruntime.x.x.x.dylib"
+            export MASK_SEG_MODEL=/path/to/segmentation_model.onnx
+            export MASK_CLS_MODEL=/path/to/classification_model.onnx
+            ./jm-mask-rs
+
+          首次运行如被 Gatekeeper 拦截：
+            xattr -dr com.apple.quarantine ./jm-mask-rs ./libonnxruntime*.dylib
+          TXT
+          cd pkg && tar czf "../dist/${{ matrix.asset }}.tar.gz" .
+          cd .. && ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}.tar.gz
+          if-no-files-found: error
+
+  # ── 汇总发布 ───────────────────────────────────────────────────────────
   release:
-    needs: build
+    needs: [build-static, build-macos]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -116,30 +169,36 @@ jobs:
           name: ${{ github.event.inputs.version || github.ref_name }}
           draft: false
           generate_release_notes: true
-          files: |
-            artifacts/*
+          files: artifacts/*
           body: |
             ## jm-mask-rs ${{ github.event.inputs.version || github.ref_name }}
 
-            二次元 NSFW 打码服务（Rust + onnxruntime，**静态链接、自包含**）。
+            二次元 NSFW 打码服务（Rust + onnxruntime）。接口与 `onnx_api.py` 完全兼容。
 
             ### 下载对应平台
-            | 平台 | 文件 |
-            |---|---|
-            | Linux x86_64 | `jm-mask-rs-linux-x86_64` |
-            | Linux aarch64 | `jm-mask-rs-linux-aarch64` |
-            | macOS Apple Silicon | `jm-mask-rs-macos-arm64` |
-            | macOS Intel | `jm-mask-rs-macos-x86_64` |
-            | Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` |
+
+            | 平台 | 文件 | 说明 |
+            |---|---|---|
+            | Linux x86_64 | `jm-mask-rs-linux-x86_64` | 静态链接，单文件自包含 |
+            | Linux aarch64 | `jm-mask-rs-linux-aarch64` | 静态链接，单文件自包含 |
+            | Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` | 静态链接，单文件自包含 |
+            | macOS Apple Silicon | `jm-mask-rs-macos-arm64.tar.gz` | 含二进制 + `libonnxruntime.dylib` |
+            | macOS Intel | `jm-mask-rs-macos-x86_64.tar.gz` | 含二进制 + `libonnxruntime.dylib` |
+
+            > macOS 因 ORT 官方预编译库的 CoreML 对象无法静态链接，改为动态加载并随包附带 dylib，
+            > 需设置 `MASK_ORT_DYLIB` 指向解压出的 dylib。
 
             ### 运行
             ```bash
-            chmod +x jm-mask-rs-<平台>
+            # Linux / Windows（自包含）
             MASK_ADDR=127.0.0.1:8000 \
             MASK_SEG_MODEL=/path/to/segmentation_model.onnx \
             MASK_CLS_MODEL=/path/to/classification_model.onnx \
-            ./jm-mask-rs-<平台>
+            ./jm-mask-rs-linux-x86_64
             ```
+            macOS 见压缩包内 `README.txt`。
+
+            ### 环境变量
+            `MASK_ADDR`（默认 `127.0.0.1:8000`）· `MASK_SEG_MODEL` · `MASK_CLS_MODEL` · `MASK_THREADS` · `MASK_NO_ARENA` · `MASK_ORT_DYLIB`（仅 macOS/动态构建）
 
             > 模型权重不随本仓库分发（来自 AutoHajimiMosaic，GPL-3.0），需自行准备并通过环境变量指定。
-            > 环境变量：`MASK_ADDR` `MASK_SEG_MODEL` `MASK_CLS_MODEL` `MASK_THREADS` `MASK_NO_ARENA`
