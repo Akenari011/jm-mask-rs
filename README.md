@@ -22,15 +22,30 @@
 
 到 [Releases](https://github.com/Akenari011/jm-mask-rs/releases) 下载对应平台，**无需安装 Rust**：
 
-| 平台 | 文件 |
-|---|---|
-| Linux x86_64 | `jm-mask-rs-linux-x86_64` |
-| Linux aarch64 | `jm-mask-rs-linux-aarch64` |
-| macOS Apple Silicon | `jm-mask-rs-macos-arm64` |
-| macOS Intel | `jm-mask-rs-macos-x86_64` |
-| Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` |
+| 平台 | 文件 | 说明 |
+|---|---|---|
+| Linux x86_64 | `jm-mask-rs-linux-x86_64` | 静态链接，单文件自包含（约 25 MB） |
+| Linux aarch64 | `jm-mask-rs-linux-aarch64` | 静态链接，单文件自包含（约 25 MB） |
+| Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` | 静态链接，单文件自包含（约 23 MB） |
+| macOS Apple Silicon | `jm-mask-rs-macos-arm64.tar.gz` | 二进制 + `libonnxruntime.dylib` |
+| macOS Intel | `jm-mask-rs-macos-x86_64.tar.gz` | 二进制 + `libonnxruntime.dylib` |
 
-产物为 **静态链接 onnxruntime 的自包含二进制**（约 25 MB），运行时不依赖任何 onnxruntime 动态库。
+校验：同目录 `SHA256SUMS.txt`。
+
+### macOS 说明
+
+macOS **没有静态链接版**：onnxruntime 官方 macOS 预编译库内含 CoreML 的 Objective-C++ 对象，
+静态链接会缺 `___isPlatformVersionAtLeast` 符号（`ld: symbol(s) not found for architecture arm64`）。
+因此 macOS 采用**动态加载 + 随包附带 dylib**：
+
+```bash
+tar xzf jm-mask-rs-macos-arm64.tar.gz && cd jm-mask-rs-macos-arm64
+xattr -dr com.apple.quarantine .   # 首次运行如被 Gatekeeper 拦
+export MASK_ORT_DYLIB="$PWD/libonnxruntime.1.22.0.dylib"
+export MASK_SEG_MODEL=/path/to/segmentation_model.onnx
+export MASK_CLS_MODEL=/path/to/classification_model.onnx
+./jm-mask-rs
+```
 
 ## 从源码构建
 
