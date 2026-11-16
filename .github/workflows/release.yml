@@ -76,10 +76,8 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             asset: jm-mask-rs-macos-arm64
-            wheel_platform: macosx_11_0_arm64
           - target: x86_64-apple-darwin
             asset: jm-mask-rs-macos-x86_64
-            wheel_platform: macosx_11_0_x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -95,18 +93,19 @@ jobs:
       - name: 构建（动态加载 onnxruntime）
         run: cargo build --release --target ${{ matrix.target }} --no-default-features --features dynamic-ort
 
-      - name: 取 onnxruntime dylib（来自官方 wheel）
+      - name: 取 onnxruntime dylib（微软官方 ORT 发行包）
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf whl dist && mkdir -p whl dist
-          python3 -m pip download --no-deps --only-binary=:all: \
-            --platform ${{ matrix.wheel_platform }} \
-            --python-version 3.12 \
-            --implementation cp --abi cp312 \
-            -d whl onnxruntime
-          ls -la whl
-          python3 .github/scripts/get_dylib.py whl dist
+          ORT_VER=1.22.0
+          rm -rf ort dist && mkdir -p ort dist
+          curl -sSL -o ort/ort.tgz \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VER}/onnxruntime-osx-universal2-${ORT_VER}.tgz"
+          tar xzf ort/ort.tgz -C ort
+          find ort -name "libonnxruntime*.dylib" -exec ls -la {} \;
+          DYLIB=$(find ort -name "libonnxruntime*.dylib" | head -1)
+          test -n "$DYLIB"
+          cp "$DYLIB" dist/
           ls -la dist
 
       - name: 打包（二进制 + dylib）
