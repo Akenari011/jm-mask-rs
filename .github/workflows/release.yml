@@ -100,7 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf whl && mkdir -p whl
-          python3 -m pip download --no-deps --only-binary=:all: --break-system-packages \
+          python3 -m pip download --no-deps --only-binary=:all: \
             --platform ${{ matrix.wheel_platform }} \
             --python-version 3.12 \
             --implementation cp --abi cp312 \
