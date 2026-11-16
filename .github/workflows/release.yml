@@ -99,18 +99,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf whl && mkdir -p whl
+          rm -rf whl dist && mkdir -p whl dist
           python3 -m pip download --no-deps --only-binary=:all: \
             --platform ${{ matrix.wheel_platform }} \
             --python-version 3.12 \
             --implementation cp --abi cp312 \
             -d whl onnxruntime
-          cd whl && unzip -q -o onnxruntime-*.whl -d ext
-          find ext -name "libonnxruntime*.dylib" -exec ls -la {} \;
-          DYLIB=$(find ext -name "libonnxruntime*.dylib" | head -1)
-          test -n "$DYLIB"
-          mkdir -p ../dist
-          cp "$DYLIB" ../dist/
+          ls -la whl
+          python3 .github/scripts/get_dylib.py whl dist
+          ls -la dist
 
       - name: 打包（二进制 + dylib）
         shell: bash
