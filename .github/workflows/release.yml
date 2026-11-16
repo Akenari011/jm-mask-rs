@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "发布版本号（如 v0.1.0）"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: jm-mask-rs-linux-x86_64
+            ext: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: jm-mask-rs-linux-aarch64
+            ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: jm-mask-rs-macos-arm64
+            ext: ""
+          - os: macos-13
+            target: x86_64-apple-darwin
+            asset: jm-mask-rs-macos-x86_64
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: jm-mask-rs-windows-x86_64
+            ext: ".exe"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 缓存依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: 构建（静态链接 onnxruntime）
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: 准备产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="target/${{ matrix.target }}/release/jm-mask-rs${{ matrix.ext }}"
+          test -f "$SRC"
+          mkdir -p dist
+          cp "$SRC" "dist/${{ matrix.asset }}${{ matrix.ext }}"
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 列出产物
+        run: ls -la artifacts/
+
+      - name: 生成校验和
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: ${{ github.event.inputs.version || github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            artifacts/*
+          body: |
+            ## jm-mask-rs ${{ github.event.inputs.version || github.ref_name }}
+
+            二次元 NSFW 打码服务（Rust + onnxruntime，**静态链接、自包含**）。
+
+            ### 下载对应平台
+            | 平台 | 文件 |
+            |---|---|
+            | Linux x86_64 | `jm-mask-rs-linux-x86_64` |
+            | Linux aarch64 | `jm-mask-rs-linux-aarch64` |
+            | macOS Apple Silicon | `jm-mask-rs-macos-arm64` |
+            | macOS Intel | `jm-mask-rs-macos-x86_64` |
+            | Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` |
+
+            ### 运行
+            ```bash
+            chmod +x jm-mask-rs-<平台>
+            MASK_ADDR=127.0.0.1:8000 \
+            MASK_SEG_MODEL=/path/to/segmentation_model.onnx \
+            MASK_CLS_MODEL=/path/to/classification_model.onnx \
+            ./jm-mask-rs-<平台>
+            ```
+
+            > 模型权重不随本仓库分发（来自 AutoHajimiMosaic，GPL-3.0），需自行准备并通过环境变量指定。
+            > 环境变量：`MASK_ADDR` `MASK_SEG_MODEL` `MASK_CLS_MODEL` `MASK_THREADS` `MASK_NO_ARENA`

@@ -11,7 +11,14 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 parking_lot = "0.12"
-ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "api-22"] }
+ort = { version = "2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "api-22"] }
+
+[features]
+# 默认：静态链接 onnxruntime，产物自包含（多平台发布用）
+default = ["static-ort"]
+static-ort = ["ort/download-binaries", "ort/tls-rustls"]
+# 可选：动态加载系统 libonnxruntime.so（体积小，但运行时需要该库）
+dynamic-ort = ["ort/load-dynamic"]
 
 [profile.release]
 opt-level = 3

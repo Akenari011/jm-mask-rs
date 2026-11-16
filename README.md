@@ -17,12 +17,29 @@
 > 内存没降到几十 MB 的原因：真正占内存的是 **onnxruntime 加载模型 + 1024×1024 推理的中间张量**，不是 Python 运行时。
 > 本项目的价值主要在**部署简单**（单二进制）与**启动快**，其次才是内存。
 
-## 构建
+
+## 预编译二进制（推荐）
+
+到 [Releases](https://github.com/Akenari011/jm-mask-rs/releases) 下载对应平台，**无需安装 Rust**：
+
+| 平台 | 文件 |
+|---|---|
+| Linux x86_64 | `jm-mask-rs-linux-x86_64` |
+| Linux aarch64 | `jm-mask-rs-linux-aarch64` |
+| macOS Apple Silicon | `jm-mask-rs-macos-arm64` |
+| macOS Intel | `jm-mask-rs-macos-x86_64` |
+| Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` |
+
+产物为 **静态链接 onnxruntime 的自包含二进制**（约 25 MB），运行时不依赖任何 onnxruntime 动态库。
+
+## 从源码构建
 
 ```bash
-# 依赖：Rust stable；onnxruntime 共享库（可用 pip 装 onnxruntime 获得）
+# 默认：静态链接 onnxruntime（自包含，约 25 MB）
 cargo build --release
-# 产物：target/release/jm-mask-rs
+
+# 可选：动态加载系统 libonnxruntime.so（体积仅 1.5 MB，运行时需该库）
+cargo build --release --no-default-features --features dynamic-ort
 ```
 
 ## 运行
@@ -42,7 +59,7 @@ MASK_ORT_DYLIB=/path/to/libonnxruntime.so.1.32.0 \
 | `MASK_ADDR` | `127.0.0.1:8000` | 监听地址（**只绑回环**） |
 | `MASK_SEG_MODEL` | `models/segmentation_model.onnx` | 分割（检测头）模型 |
 | `MASK_CLS_MODEL` | `models/classification_model.onnx` | 分类模型 |
-| `MASK_ORT_DYLIB` | venv 内 libonnxruntime.so | onnxruntime 动态库路径 |
+| `MASK_ORT_DYLIB` | venv 内 libonnxruntime.so | 仅 `dynamic-ort` 构建需要 |
 | `MASK_THREADS` | CPU 核数/2 | 推理线程数（2 核 → 0.56s/张，8 核 → 0.19s/张） |
 | `MASK_NO_ARENA` | 1 | 关闭 CPU 内存池，RSS 更平稳 |
 

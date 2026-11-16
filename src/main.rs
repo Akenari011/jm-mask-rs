@@ -600,13 +600,19 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| (std::thread::available_parallelism().map(|v| v.get()).unwrap_or(4) / 2).max(1));
 
-    let dylib = std::env::var("MASK_ORT_DYLIB").unwrap_or_else(|_| {
-        "/home/ubuntu/AutoHajimiMosaic/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.32.0".to_string()
-    });
-    let env = ort::init_from(&dylib)
-        .expect("init onnxruntime dylib")
-        .build()
-        .expect("ort environment");
+    // 静态构建：onnxruntime 已链接进二进制；动态构建：从 MASK_ORT_DYLIB 加载
+    #[cfg(feature = "dynamic-ort")]
+    let env = {
+        let dylib = std::env::var("MASK_ORT_DYLIB").unwrap_or_else(|_| {
+            "/home/ubuntu/AutoHajimiMosaic/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.32.0".to_string()
+        });
+        ort::init_from(&dylib)
+            .expect("init onnxruntime dylib")
+            .build()
+            .expect("ort environment")
+    };
+    #[cfg(not(feature = "dynamic-ort"))]
+    let env = ort::init().build().expect("ort environment");
     // 关闭 CPU 内存池，让 RSS 平稳（大图推理后不保留峰值 arena）
     let no_arena: Option<Vec<(String, String)>> = if std::env::var("MASK_NO_ARENA").map(|v| v != "0").unwrap_or(true) {
         Some(vec![("CPUExecutionProvider.use_arena".to_string(), "0".to_string())])
