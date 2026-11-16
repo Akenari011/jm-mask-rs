@@ -43,6 +43,10 @@ jobs:
             asset: jm-mask-rs-windows-x86_64
             ext: ".exe"
 
+    env:
+      # macOS：ORT 静态库依赖较新的部署目标，否则链接报 ___isPlatformVersionAtLeast
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+
     steps:
       - uses: actions/checkout@v4
 
