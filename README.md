@@ -22,15 +22,32 @@
 
 到 [Releases](https://github.com/Akenari011/jm-mask-rs/releases) 下载对应平台，**无需安装 Rust**：
 
-| 平台 | 文件 | 说明 |
+| 平台 | 文件 | 运行时还需要 |
 |---|---|---|
-| Linux x86_64 | `jm-mask-rs-linux-x86_64` | 静态链接，单文件自包含（约 25 MB） |
-| Linux aarch64 | `jm-mask-rs-linux-aarch64` | 静态链接，单文件自包含（约 25 MB） |
-| Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` | 静态链接，单文件自包含（约 23 MB） |
-| macOS Apple Silicon | `jm-mask-rs-macos-arm64.tar.gz` | 二进制 + `libonnxruntime.dylib` |
-| macOS Intel | `jm-mask-rs-macos-x86_64.tar.gz` | 二进制 + `libonnxruntime.dylib` |
+| Linux x86_64 | `jm-mask-rs-linux-x86_64` | `libonnxruntime.so` + 两个 `.onnx` 模型 |
+| Linux aarch64 | `jm-mask-rs-linux-aarch64` | `libonnxruntime.so` + 两个 `.onnx` 模型 |
+| Windows x86_64 | `jm-mask-rs-windows-x86_64.exe` | `onnxruntime.dll` + 两个 `.onnx` 模型 |
+| macOS Apple Silicon | `jm-mask-rs-macos-arm64.tar.gz` | 包内 `libonnxruntime.dylib` + 两个 `.onnx` 模型 |
+| macOS Intel | `jm-mask-rs-macos-x86_64.tar.gz` | 包内 `libonnxruntime.dylib` + 两个 `.onnx` 模型 |
 
 校验：同目录 `SHA256SUMS.txt`。
+
+> **关于“自包含”**：二进制本身不静态链接 onnxruntime（`ldd` 里看不到它），
+> 运行时通过 `MASK_ORT_DYLIB` 动态加载，因此 Linux/Windows 仍需单独提供
+> `libonnxruntime.so` / `onnxruntime.dll`。完整可移植部署一共 4 个文件：
+> 二进制 + 运行时库 + 分割模型 + 分类模型（约 104 MB），不需要 Python。
+
+### 最小可移植部署（Linux）
+
+```bash
+mkdir -p jm-mask && cd jm-mask
+# 放入 jm-mask-rs、libonnxruntime.so、segmentation_model.onnx、classification_model.onnx
+MASK_ADDR=127.0.0.1:8000 \
+MASK_ORT_DYLIB="$PWD/libonnxruntime.so" \
+MASK_SEG_MODEL="$PWD/segmentation_model.onnx" \
+MASK_CLS_MODEL="$PWD/classification_model.onnx" \
+./jm-mask-rs
+```
 
 ### macOS 说明
 
